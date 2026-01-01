@@ -2,10 +2,16 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 
 	"github.com/spf13/cobra"
+
+	"github.com/salmonumbrella/dub-cli/internal/api"
+	"github.com/salmonumbrella/dub-cli/internal/outfmt"
 )
 
 func newPartnersCmd() *cobra.Command {
@@ -90,7 +96,9 @@ func newPartnersListCmd() *cobra.Command {
 		programID string
 		search    string
 		status    string
-		page      int
+		output    string
+		limit     int
+		all       bool
 	)
 
 	cmd := &cobra.Command{
@@ -115,27 +123,132 @@ func newPartnersListCmd() *cobra.Command {
 			if status != "" {
 				params.Set("status", status)
 			}
-			if page > 0 {
-				params.Set("page", fmt.Sprintf("%d", page))
-			}
 
 			resp, err := client.Get(cmd.Context(), "/partners?"+params.Encode())
 			if err != nil {
 				return err
 			}
 
-			return handleResponse(cmd, resp)
+			return handlePartnersListResponse(cmd, resp, output, limit, all)
 		},
 	}
 
 	cmd.Flags().StringVar(&programID, "program-id", "", "Program ID (required)")
 	cmd.Flags().StringVar(&search, "search", "", "Search query")
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status")
-	cmd.Flags().IntVar(&page, "page", 0, "Page number")
+	cmd.Flags().StringVarP(&output, "output", "o", "table", "Output format: table, json")
+	cmd.Flags().IntVar(&limit, "limit", 25, "Maximum number of partners to show")
+	cmd.Flags().BoolVar(&all, "all", false, "Show all partners (ignore limit)")
 
 	_ = cmd.MarkFlagRequired("program-id")
 
 	return cmd
+}
+
+// handlePartnersListResponse handles the response for partners list command,
+// formatting output as table or JSON based on the output flag.
+func handlePartnersListResponse(cmd *cobra.Command, resp *http.Response, output string, limit int, all bool) error {
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode >= 400 {
+		apiErr := api.ParseAPIError(body)
+		return fmt.Errorf("%s", apiErr.Error())
+	}
+
+	// For JSON output, use the existing handler
+	if output == "json" {
+		var data interface{}
+		if err := json.Unmarshal(body, &data); err != nil {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(body))
+			return nil
+		}
+		query := outfmt.GetQuery(cmd.Context())
+		return outfmt.FormatJSON(cmd.OutOrStdout(), data, query)
+	}
+
+	// Parse partners for table output
+	var partners []map[string]interface{}
+	if err := json.Unmarshal(body, &partners); err != nil {
+		return fmt.Errorf("failed to parse partners: %w", err)
+	}
+
+	totalCount := len(partners)
+
+	// Apply limit unless --all is set
+	displayLimit := limit
+	if all {
+		displayLimit = totalCount
+	}
+	if displayLimit > totalCount {
+		displayLimit = totalCount
+	}
+
+	displayPartners := partners[:displayLimit]
+
+	// Define table columns
+	columns := []outfmt.Column{
+		{Name: "Name", Width: 0, Align: outfmt.AlignLeft},
+		{Name: "Email", Width: 0, Align: outfmt.AlignLeft},
+		{Name: "Status", Width: 0, Align: outfmt.AlignLeft},
+		{Name: "Country", Width: 0, Align: outfmt.AlignLeft},
+		{Name: "Created", Width: 0, Align: outfmt.AlignLeft},
+	}
+
+	// Build rows
+	rows := make([][]string, len(displayPartners))
+	for i, partner := range displayPartners {
+		rows[i] = []string{
+			formatPartnerName(partner["name"]),
+			outfmt.SafeString(partner["email"]),
+			formatPartnerStatus(partner["status"]),
+			formatPartnerCountry(partner["country"]),
+			outfmt.FormatDate(partner["createdAt"]),
+		}
+	}
+
+	// Write table
+	if err := outfmt.FormatTable(cmd.OutOrStdout(), columns, rows); err != nil {
+		return err
+	}
+
+	// Show pagination message if limited
+	if displayLimit < totalCount {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nShowing %d of %d partners. Use --limit or --all for more.\n", displayLimit, totalCount)
+	}
+
+	return nil
+}
+
+// formatPartnerName formats the partner name or returns "-" if not set.
+func formatPartnerName(name interface{}) string {
+	s := outfmt.SafeString(name)
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+// formatPartnerStatus formats the partner status.
+func formatPartnerStatus(status interface{}) string {
+	s := outfmt.SafeString(status)
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+// formatPartnerCountry formats the partner country code or returns "-" if not set.
+func formatPartnerCountry(country interface{}) string {
+	s := outfmt.SafeString(country)
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 func newPartnersBanCmd() *cobra.Command {
@@ -323,7 +436,9 @@ func newPartnersLinksListCmd() *cobra.Command {
 	var (
 		programID string
 		partnerID string
-		page      int
+		output    string
+		limit     int
+		all       bool
 	)
 
 	cmd := &cobra.Command{
@@ -345,26 +460,102 @@ func newPartnersLinksListCmd() *cobra.Command {
 			if partnerID != "" {
 				params.Set("partnerId", partnerID)
 			}
-			if page > 0 {
-				params.Set("page", fmt.Sprintf("%d", page))
-			}
 
 			resp, err := client.Get(cmd.Context(), "/partners/links?"+params.Encode())
 			if err != nil {
 				return err
 			}
 
-			return handleResponse(cmd, resp)
+			return handlePartnersLinksListResponse(cmd, resp, output, limit, all)
 		},
 	}
 
 	cmd.Flags().StringVar(&programID, "program-id", "", "Program ID (required)")
 	cmd.Flags().StringVar(&partnerID, "partner-id", "", "Filter by partner ID")
-	cmd.Flags().IntVar(&page, "page", 0, "Page number")
+	cmd.Flags().StringVarP(&output, "output", "o", "table", "Output format: table, json")
+	cmd.Flags().IntVar(&limit, "limit", 25, "Maximum number of links to show")
+	cmd.Flags().BoolVar(&all, "all", false, "Show all links (ignore limit)")
 
 	_ = cmd.MarkFlagRequired("program-id")
 
 	return cmd
+}
+
+// handlePartnersLinksListResponse handles the response for partners links list command,
+// formatting output as table or JSON based on the output flag.
+func handlePartnersLinksListResponse(cmd *cobra.Command, resp *http.Response, output string, limit int, all bool) error {
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode >= 400 {
+		apiErr := api.ParseAPIError(body)
+		return fmt.Errorf("%s", apiErr.Error())
+	}
+
+	// For JSON output, use the existing handler
+	if output == "json" {
+		var data interface{}
+		if err := json.Unmarshal(body, &data); err != nil {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(body))
+			return nil
+		}
+		query := outfmt.GetQuery(cmd.Context())
+		return outfmt.FormatJSON(cmd.OutOrStdout(), data, query)
+	}
+
+	// Parse links for table output
+	var links []map[string]interface{}
+	if err := json.Unmarshal(body, &links); err != nil {
+		return fmt.Errorf("failed to parse links: %w", err)
+	}
+
+	totalCount := len(links)
+
+	// Apply limit unless --all is set
+	displayLimit := limit
+	if all {
+		displayLimit = totalCount
+	}
+	if displayLimit > totalCount {
+		displayLimit = totalCount
+	}
+
+	displayLinks := links[:displayLimit]
+
+	// Define table columns
+	columns := []outfmt.Column{
+		{Name: "Short Link", Width: 0, Align: outfmt.AlignLeft},
+		{Name: "URL", Width: 50, Align: outfmt.AlignLeft},
+		{Name: "Clicks", Width: 0, Align: outfmt.AlignRight},
+		{Name: "Created", Width: 0, Align: outfmt.AlignLeft},
+	}
+
+	// Build rows
+	rows := make([][]string, len(displayLinks))
+	for i, link := range displayLinks {
+		rows[i] = []string{
+			buildShortLink(outfmt.SafeString(link["domain"]), outfmt.SafeString(link["key"])),
+			outfmt.Truncate(outfmt.SafeString(link["url"]), 50),
+			formatClicks(outfmt.SafeInt(link["clicks"])),
+			outfmt.FormatDate(link["createdAt"]),
+		}
+	}
+
+	// Write table
+	if err := outfmt.FormatTable(cmd.OutOrStdout(), columns, rows); err != nil {
+		return err
+	}
+
+	// Show pagination message if limited
+	if displayLimit < totalCount {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nShowing %d of %d links. Use --limit or --all for more.\n", displayLimit, totalCount)
+	}
+
+	return nil
 }
 
 func newPartnersAnalyticsCmd() *cobra.Command {

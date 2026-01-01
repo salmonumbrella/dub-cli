@@ -106,11 +106,47 @@ func TestPartnersListCmd_RequiresProgramID(t *testing.T) {
 func TestPartnersListCmd_Flags(t *testing.T) {
 	cmd := newPartnersListCmd()
 
-	flags := []string{"program-id", "search", "status", "page"}
+	flags := []string{"program-id", "search", "status", "output", "limit", "all"}
 	for _, name := range flags {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("expected flag %q to exist", name)
 		}
+	}
+}
+
+func TestPartnersListCmd_OutputFlagShorthand(t *testing.T) {
+	cmd := newPartnersListCmd()
+
+	flag := cmd.Flags().Lookup("output")
+	if flag == nil {
+		t.Fatal("expected output flag to exist")
+	}
+	if flag.Shorthand != "o" {
+		t.Errorf("expected output flag shorthand to be 'o', got %q", flag.Shorthand)
+	}
+}
+
+func TestPartnersListCmd_LimitDefault(t *testing.T) {
+	cmd := newPartnersListCmd()
+
+	flag := cmd.Flags().Lookup("limit")
+	if flag == nil {
+		t.Fatal("expected limit flag to exist")
+	}
+	if flag.DefValue != "25" {
+		t.Errorf("expected limit default to be '25', got %q", flag.DefValue)
+	}
+}
+
+func TestPartnersListCmd_OutputDefault(t *testing.T) {
+	cmd := newPartnersListCmd()
+
+	flag := cmd.Flags().Lookup("output")
+	if flag == nil {
+		t.Fatal("expected output flag to exist")
+	}
+	if flag.DefValue != "table" {
+		t.Errorf("expected output default to be 'table', got %q", flag.DefValue)
 	}
 }
 
@@ -161,6 +197,63 @@ func TestPartnersLinksCreateCmd_RequiresURL(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when --url is not provided")
+	}
+}
+
+func TestPartnersLinksListCmd_RequiresProgramID(t *testing.T) {
+	cmd := newPartnersLinksListCmd()
+	cmd.SetArgs([]string{})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Error("expected error when --program-id is not provided")
+	}
+}
+
+func TestPartnersLinksListCmd_Flags(t *testing.T) {
+	cmd := newPartnersLinksListCmd()
+
+	flags := []string{"program-id", "partner-id", "output", "limit", "all"}
+	for _, name := range flags {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("expected flag %q to exist", name)
+		}
+	}
+}
+
+func TestPartnersLinksListCmd_OutputFlagShorthand(t *testing.T) {
+	cmd := newPartnersLinksListCmd()
+
+	flag := cmd.Flags().Lookup("output")
+	if flag == nil {
+		t.Fatal("expected output flag to exist")
+	}
+	if flag.Shorthand != "o" {
+		t.Errorf("expected output flag shorthand to be 'o', got %q", flag.Shorthand)
+	}
+}
+
+func TestPartnersLinksListCmd_LimitDefault(t *testing.T) {
+	cmd := newPartnersLinksListCmd()
+
+	flag := cmd.Flags().Lookup("limit")
+	if flag == nil {
+		t.Fatal("expected limit flag to exist")
+	}
+	if flag.DefValue != "25" {
+		t.Errorf("expected limit default to be '25', got %q", flag.DefValue)
+	}
+}
+
+func TestPartnersLinksListCmd_OutputDefault(t *testing.T) {
+	cmd := newPartnersLinksListCmd()
+
+	flag := cmd.Flags().Lookup("output")
+	if flag == nil {
+		t.Fatal("expected output flag to exist")
+	}
+	if flag.DefValue != "table" {
+		t.Errorf("expected output default to be 'table', got %q", flag.DefValue)
 	}
 }
 
