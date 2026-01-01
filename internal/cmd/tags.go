@@ -2,10 +2,16 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 
 	"github.com/spf13/cobra"
+
+	"github.com/salmonumbrella/dub-cli/internal/api"
+	"github.com/salmonumbrella/dub-cli/internal/outfmt"
 )
 
 func newTagsCmd() *cobra.Command {
@@ -69,7 +75,9 @@ func newTagsCreateCmd() *cobra.Command {
 func newTagsListCmd() *cobra.Command {
 	var (
 		search string
-		page   int
+		output string
+		limit  int
+		all    bool
 	)
 
 	cmd := &cobra.Command{
@@ -86,9 +94,6 @@ func newTagsListCmd() *cobra.Command {
 			if search != "" {
 				params.Set("search", search)
 			}
-			if page > 0 {
-				params.Set("page", fmt.Sprintf("%d", page))
-			}
 
 			path := "/tags"
 			if len(params) > 0 {
@@ -100,12 +105,14 @@ func newTagsListCmd() *cobra.Command {
 				return err
 			}
 
-			return handleResponse(cmd, resp)
+			return handleTagsListResponse(cmd, resp, output, limit, all)
 		},
 	}
 
 	cmd.Flags().StringVar(&search, "search", "", "Search query")
-	cmd.Flags().IntVar(&page, "page", 0, "Page number")
+	cmd.Flags().StringVarP(&output, "output", "o", "table", "Output format: table, json")
+	cmd.Flags().IntVar(&limit, "limit", 25, "Maximum number of tags to show")
+	cmd.Flags().BoolVar(&all, "all", false, "Show all tags (ignore limit)")
 
 	return cmd
 }
@@ -159,4 +166,106 @@ func newTagsUpdateCmd() *cobra.Command {
 	_ = cmd.MarkFlagRequired("id")
 
 	return cmd
+}
+
+// handleTagsListResponse handles the response for tags list command,
+// formatting output as table or JSON based on the output flag.
+func handleTagsListResponse(cmd *cobra.Command, resp *http.Response, output string, limit int, all bool) error {
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode >= 400 {
+		apiErr := api.ParseAPIError(body)
+		return fmt.Errorf("%s", apiErr.Error())
+	}
+
+	// For JSON output, use the existing handler
+	if output == "json" {
+		var data interface{}
+		if err := json.Unmarshal(body, &data); err != nil {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(body))
+			return nil
+		}
+		query := outfmt.GetQuery(cmd.Context())
+		return outfmt.FormatJSON(cmd.OutOrStdout(), data, query)
+	}
+
+	// Parse tags for table output
+	var tags []map[string]interface{}
+	if err := json.Unmarshal(body, &tags); err != nil {
+		return fmt.Errorf("failed to parse tags: %w", err)
+	}
+
+	totalCount := len(tags)
+
+	// Apply limit unless --all is set
+	displayLimit := limit
+	if all {
+		displayLimit = totalCount
+	}
+	if displayLimit > totalCount {
+		displayLimit = totalCount
+	}
+
+	displayTags := tags[:displayLimit]
+
+	// Define table columns
+	columns := []outfmt.Column{
+		{Name: "Name", Width: 0, Align: outfmt.AlignLeft},
+		{Name: "Color", Width: 0, Align: outfmt.AlignLeft},
+		{Name: "Links", Width: 0, Align: outfmt.AlignRight},
+	}
+
+	// Build rows
+	rows := make([][]string, len(displayTags))
+	for i, tag := range displayTags {
+		rows[i] = []string{
+			outfmt.SafeString(tag["name"]),
+			formatTagColor(tag["color"]),
+			formatTagLinkCount(tag),
+		}
+	}
+
+	// Write table
+	if err := outfmt.FormatTable(cmd.OutOrStdout(), columns, rows); err != nil {
+		return err
+	}
+
+	// Show pagination message if limited
+	if displayLimit < totalCount {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nShowing %d of %d tags. Use --limit or --all for more.\n", displayLimit, totalCount)
+	}
+
+	return nil
+}
+
+// formatTagColor formats the tag color or returns "-" if not set.
+func formatTagColor(color interface{}) string {
+	s := outfmt.SafeString(color)
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+// formatTagLinkCount extracts the link count from tag data.
+// The API returns link count in _count.links nested structure.
+func formatTagLinkCount(tag map[string]interface{}) string {
+	// Try _count.links nested structure first
+	if countObj, ok := tag["_count"].(map[string]interface{}); ok {
+		if links, ok := countObj["links"]; ok {
+			return formatClicks(outfmt.SafeInt(links))
+		}
+	}
+
+	// Fallback to direct links field
+	if links, ok := tag["links"]; ok {
+		return formatClicks(outfmt.SafeInt(links))
+	}
+
+	return "0"
 }

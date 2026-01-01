@@ -80,22 +80,53 @@ func TestTagsListCmd_SearchFlag(t *testing.T) {
 	}
 }
 
-// TestTagsListCmd_PageFlag verifies the page flag exists
-func TestTagsListCmd_PageFlag(t *testing.T) {
-	cmd := newTagsListCmd()
-	if cmd.Flags().Lookup("page") == nil {
-		t.Error("expected flag 'page' to exist")
-	}
-}
-
 // TestTagsListCmd_AllFlags verifies all required flags exist on list
 func TestTagsListCmd_AllFlags(t *testing.T) {
 	cmd := newTagsListCmd()
-	flags := []string{"search", "page"}
+	flags := []string{"search", "output", "limit", "all"}
 	for _, name := range flags {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("expected flag %q to exist", name)
 		}
+	}
+}
+
+// TestTagsListCmd_OutputFlagShorthand verifies the output flag has -o shorthand
+func TestTagsListCmd_OutputFlagShorthand(t *testing.T) {
+	cmd := newTagsListCmd()
+
+	flag := cmd.Flags().Lookup("output")
+	if flag == nil {
+		t.Fatal("expected flag 'output' to exist")
+	}
+	if flag.Shorthand != "o" {
+		t.Errorf("expected output flag shorthand to be 'o', got %q", flag.Shorthand)
+	}
+}
+
+// TestTagsListCmd_DefaultLimit verifies the default limit is 25
+func TestTagsListCmd_DefaultLimit(t *testing.T) {
+	cmd := newTagsListCmd()
+
+	flag := cmd.Flags().Lookup("limit")
+	if flag == nil {
+		t.Fatal("expected flag 'limit' to exist")
+	}
+	if flag.DefValue != "25" {
+		t.Errorf("expected limit default to be '25', got %q", flag.DefValue)
+	}
+}
+
+// TestTagsListCmd_DefaultOutput verifies the default output is table
+func TestTagsListCmd_DefaultOutput(t *testing.T) {
+	cmd := newTagsListCmd()
+
+	flag := cmd.Flags().Lookup("output")
+	if flag == nil {
+		t.Fatal("expected flag 'output' to exist")
+	}
+	if flag.DefValue != "table" {
+		t.Errorf("expected output default to be 'table', got %q", flag.DefValue)
 	}
 }
 
@@ -155,5 +186,68 @@ func TestTagsUpdateCmd_AllFlags(t *testing.T) {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("expected flag %q to exist", name)
 		}
+	}
+}
+
+// TestFormatTagColor tests the formatTagColor helper function
+func TestFormatTagColor(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    interface{}
+		expected string
+	}{
+		{"nil value", nil, "-"},
+		{"empty string", "", "-"},
+		{"red color", "red", "red"},
+		{"blue color", "blue", "blue"},
+		{"green color", "green", "green"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatTagColor(tt.input)
+			if result != tt.expected {
+				t.Errorf("formatTagColor(%v) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestFormatTagLinkCount tests the formatTagLinkCount helper function
+func TestFormatTagLinkCount(t *testing.T) {
+	tests := []struct {
+		name     string
+		tag      map[string]interface{}
+		expected string
+	}{
+		{
+			name:     "no links field",
+			tag:      map[string]interface{}{"name": "marketing"},
+			expected: "0",
+		},
+		{
+			name:     "links in _count.links",
+			tag:      map[string]interface{}{"_count": map[string]interface{}{"links": float64(45)}},
+			expected: "45",
+		},
+		{
+			name:     "links as direct field",
+			tag:      map[string]interface{}{"links": float64(12)},
+			expected: "12",
+		},
+		{
+			name:     "links with comma formatting",
+			tag:      map[string]interface{}{"_count": map[string]interface{}{"links": float64(1234)}},
+			expected: "1,234",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatTagLinkCount(tt.tag)
+			if result != tt.expected {
+				t.Errorf("formatTagLinkCount() = %q, want %q", result, tt.expected)
+			}
+		})
 	}
 }
