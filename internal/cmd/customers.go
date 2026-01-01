@@ -2,10 +2,16 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 
 	"github.com/spf13/cobra"
+
+	"github.com/salmonumbrella/dub-cli/internal/api"
+	"github.com/salmonumbrella/dub-cli/internal/outfmt"
 )
 
 func newCustomersCmd() *cobra.Command {
@@ -26,7 +32,9 @@ func newCustomersCmd() *cobra.Command {
 func newCustomersListCmd() *cobra.Command {
 	var (
 		search string
-		page   int
+		output string
+		limit  int
+		all    bool
 	)
 
 	cmd := &cobra.Command{
@@ -43,9 +51,6 @@ func newCustomersListCmd() *cobra.Command {
 			if search != "" {
 				params.Set("search", search)
 			}
-			if page > 0 {
-				params.Set("page", fmt.Sprintf("%d", page))
-			}
 
 			path := "/customers"
 			if len(params) > 0 {
@@ -57,12 +62,14 @@ func newCustomersListCmd() *cobra.Command {
 				return err
 			}
 
-			return handleResponse(cmd, resp)
+			return handleCustomersListResponse(cmd, resp, output, limit, all)
 		},
 	}
 
 	cmd.Flags().StringVar(&search, "search", "", "Search query")
-	cmd.Flags().IntVar(&page, "page", 0, "Page number")
+	cmd.Flags().StringVarP(&output, "output", "o", "table", "Output format: table, json")
+	cmd.Flags().IntVar(&limit, "limit", 25, "Maximum number of customers to show")
+	cmd.Flags().BoolVar(&all, "all", false, "Show all customers (ignore limit)")
 
 	return cmd
 }
@@ -196,4 +203,90 @@ func newCustomersDeleteCmd() *cobra.Command {
 	_ = cmd.MarkFlagRequired("id")
 
 	return cmd
+}
+
+// handleCustomersListResponse handles the response for customers list command,
+// formatting output as table or JSON based on the output flag.
+func handleCustomersListResponse(cmd *cobra.Command, resp *http.Response, output string, limit int, all bool) error {
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode >= 400 {
+		apiErr := api.ParseAPIError(body)
+		return fmt.Errorf("%s", apiErr.Error())
+	}
+
+	// For JSON output, use the existing handler
+	if output == "json" {
+		var data interface{}
+		if err := json.Unmarshal(body, &data); err != nil {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(body))
+			return nil
+		}
+		query := outfmt.GetQuery(cmd.Context())
+		return outfmt.FormatJSON(cmd.OutOrStdout(), data, query)
+	}
+
+	// Parse customers for table output
+	var customers []map[string]interface{}
+	if err := json.Unmarshal(body, &customers); err != nil {
+		return fmt.Errorf("failed to parse customers: %w", err)
+	}
+
+	totalCount := len(customers)
+
+	// Apply limit unless --all is set
+	displayLimit := limit
+	if all {
+		displayLimit = totalCount
+	}
+	if displayLimit > totalCount {
+		displayLimit = totalCount
+	}
+
+	displayCustomers := customers[:displayLimit]
+
+	// Define table columns
+	columns := []outfmt.Column{
+		{Name: "NAME", Width: 0, Align: outfmt.AlignLeft},
+		{Name: "EMAIL", Width: 0, Align: outfmt.AlignLeft},
+		{Name: "EXTERNAL ID", Width: 0, Align: outfmt.AlignLeft},
+		{Name: "CREATED", Width: 0, Align: outfmt.AlignLeft},
+	}
+
+	// Build rows
+	rows := make([][]string, len(displayCustomers))
+	for i, customer := range displayCustomers {
+		rows[i] = []string{
+			formatCustomerField(customer["name"]),
+			formatCustomerField(customer["email"]),
+			formatCustomerField(customer["externalId"]),
+			outfmt.FormatDate(customer["createdAt"]),
+		}
+	}
+
+	// Write table
+	if err := outfmt.FormatTable(cmd.OutOrStdout(), columns, rows); err != nil {
+		return err
+	}
+
+	// Show pagination message if limited
+	if displayLimit < totalCount {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nShowing %d of %d customers. Use --limit or --all for more.\n", displayLimit, totalCount)
+	}
+
+	return nil
+}
+
+// formatCustomerField formats a customer field or returns "-" if not set.
+func formatCustomerField(field interface{}) string {
+	s := outfmt.SafeString(field)
+	if s == "" {
+		return "-"
+	}
+	return s
 }

@@ -105,11 +105,47 @@ func TestCustomersDeleteCmd_RequiresID(t *testing.T) {
 
 func TestCustomersListCmd_Flags(t *testing.T) {
 	cmd := newCustomersListCmd()
-	flags := []string{"search", "page"}
+	flags := []string{"search", "output", "limit", "all"}
 	for _, name := range flags {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("expected flag %q to exist", name)
 		}
+	}
+}
+
+func TestCustomersListCmd_OutputFlagShorthand(t *testing.T) {
+	cmd := newCustomersListCmd()
+
+	flag := cmd.Flags().Lookup("output")
+	if flag == nil {
+		t.Fatal("expected flag 'output' to exist")
+	}
+	if flag.Shorthand != "o" {
+		t.Errorf("expected output flag shorthand to be 'o', got %q", flag.Shorthand)
+	}
+}
+
+func TestCustomersListCmd_DefaultLimit(t *testing.T) {
+	cmd := newCustomersListCmd()
+
+	flag := cmd.Flags().Lookup("limit")
+	if flag == nil {
+		t.Fatal("expected flag 'limit' to exist")
+	}
+	if flag.DefValue != "25" {
+		t.Errorf("expected limit default to be '25', got %q", flag.DefValue)
+	}
+}
+
+func TestCustomersListCmd_DefaultOutput(t *testing.T) {
+	cmd := newCustomersListCmd()
+
+	flag := cmd.Flags().Lookup("output")
+	if flag == nil {
+		t.Fatal("expected flag 'output' to exist")
+	}
+	if flag.DefValue != "table" {
+		t.Errorf("expected output default to be 'table', got %q", flag.DefValue)
 	}
 }
 
@@ -159,5 +195,28 @@ func TestCustomersDeleteCmd_DryRunFlag(t *testing.T) {
 	cmd := newCustomersDeleteCmd()
 	if cmd.Flags().Lookup("dry-run") == nil {
 		t.Error("expected flag 'dry-run' to exist")
+	}
+}
+
+func TestFormatCustomerField(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    interface{}
+		expected string
+	}{
+		{"nil value", nil, "-"},
+		{"empty string", "", "-"},
+		{"valid name", "John Doe", "John Doe"},
+		{"valid email", "john@example.com", "john@example.com"},
+		{"valid external ID", "cust_123", "cust_123"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatCustomerField(tt.input)
+			if result != tt.expected {
+				t.Errorf("formatCustomerField(%v) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
 	}
 }
