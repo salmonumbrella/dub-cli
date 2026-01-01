@@ -478,6 +478,7 @@ const setupTemplate = `<!DOCTYPE html>
 
         <div class="form-card">
             <form id="setupForm" autocomplete="off">
+                <input type="hidden" name="csrf_token" id="csrf_token" value="{{.CSRFToken}}">
                 <div class="form-group">
                     <div class="label-row">
                         <label for="workspace">Workspace Name</label>
@@ -544,7 +545,7 @@ const setupTemplate = `<!DOCTYPE html>
         const workspaceInput = document.getElementById('workspace');
         const eyeIcon = document.getElementById('eyeIcon');
         const eyeOffIcon = document.getElementById('eyeOffIcon');
-        const csrfToken = '{{.CSRFToken}}';
+        const csrfToken = document.getElementById('csrf_token').value;
 
         let isBusy = false;
 
