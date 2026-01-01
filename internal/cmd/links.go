@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -36,6 +38,148 @@ func handleResponse(cmd *cobra.Command, resp *http.Response) error {
 
 	query := outfmt.GetQuery(cmd.Context())
 	return outfmt.FormatJSON(cmd.OutOrStdout(), data, query)
+}
+
+// Link represents a Dub link from the API response.
+type Link struct {
+	ID          string  `json:"id"`
+	Domain      string  `json:"domain"`
+	Key         string  `json:"key"`
+	URL         string  `json:"url"`
+	Clicks      int     `json:"clicks"`
+	LastClicked *string `json:"lastClicked"`
+}
+
+// handleLinksListResponse handles the response for links list command,
+// formatting output as table or JSON based on the output flag.
+func handleLinksListResponse(cmd *cobra.Command, resp *http.Response, output string, limit int, all bool) error {
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode >= 400 {
+		apiErr := api.ParseAPIError(body)
+		return fmt.Errorf("%s", apiErr.Error())
+	}
+
+	// For JSON output, use the existing handler
+	if output == "json" {
+		var data interface{}
+		if err := json.Unmarshal(body, &data); err != nil {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(body))
+			return nil
+		}
+		query := outfmt.GetQuery(cmd.Context())
+		return outfmt.FormatJSON(cmd.OutOrStdout(), data, query)
+	}
+
+	// Parse links for table output
+	var links []Link
+	if err := json.Unmarshal(body, &links); err != nil {
+		return fmt.Errorf("failed to parse links: %w", err)
+	}
+
+	totalCount := len(links)
+
+	// Apply limit unless --all is set
+	displayLimit := limit
+	if all {
+		displayLimit = totalCount
+	}
+	if displayLimit > totalCount {
+		displayLimit = totalCount
+	}
+
+	displayLinks := links[:displayLimit]
+
+	// Define table columns
+	columns := []outfmt.Column{
+		{Name: "Short Link", Width: 0, Align: outfmt.AlignLeft},
+		{Name: "URL", Width: 40, Align: outfmt.AlignLeft},
+		{Name: "Clicks", Width: 0, Align: outfmt.AlignRight},
+		{Name: "Last Clicked", Width: 0, Align: outfmt.AlignLeft},
+	}
+
+	// Build rows
+	rows := make([][]string, len(displayLinks))
+	for i, link := range displayLinks {
+		rows[i] = []string{
+			buildShortLink(link.Domain, link.Key),
+			outfmt.Truncate(link.URL, 40),
+			formatClicks(link.Clicks),
+			formatLastClicked(link.LastClicked),
+		}
+	}
+
+	// Write table
+	if err := outfmt.FormatTable(cmd.OutOrStdout(), columns, rows); err != nil {
+		return err
+	}
+
+	// Show pagination message if limited
+	if displayLimit < totalCount {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nShowing %d of %d links. Use --limit or --all for more.\n", displayLimit, totalCount)
+	}
+
+	return nil
+}
+
+// buildShortLink combines domain and key into a short link.
+func buildShortLink(domain, key string) string {
+	return domain + "/" + key
+}
+
+// formatClicks formats a click count with comma separators.
+func formatClicks(clicks int) string {
+	if clicks == 0 {
+		return "0"
+	}
+
+	s := strconv.Itoa(clicks)
+	n := len(s)
+
+	// Calculate number of commas needed
+	commaCount := (n - 1) / 3
+	if commaCount == 0 {
+		return s
+	}
+
+	result := make([]byte, n+commaCount)
+	resultIdx := len(result) - 1
+
+	for i := n - 1; i >= 0; i-- {
+		pos := n - 1 - i
+		if pos > 0 && pos%3 == 0 {
+			result[resultIdx] = ','
+			resultIdx--
+		}
+		result[resultIdx] = s[i]
+		resultIdx--
+	}
+
+	return string(result)
+}
+
+// formatLastClicked formats an ISO 8601 timestamp to "Jan 15, 2024" format.
+// Returns "-" if the timestamp is nil or empty.
+func formatLastClicked(ts *string) string {
+	if ts == nil || *ts == "" {
+		return "-"
+	}
+
+	t, err := time.Parse(time.RFC3339, *ts)
+	if err != nil {
+		// Try alternative formats
+		t, err = time.Parse("2006-01-02T15:04:05Z", *ts)
+		if err != nil {
+			return "-"
+		}
+	}
+
+	return t.Format("Jan 2, 2006")
 }
 
 func newLinksCmd() *cobra.Command {
@@ -110,6 +254,9 @@ func newLinksListCmd() *cobra.Command {
 	var (
 		search string
 		domain string
+		output string
+		limit  int
+		all    bool
 	)
 
 	cmd := &cobra.Command{
@@ -140,12 +287,15 @@ func newLinksListCmd() *cobra.Command {
 				return err
 			}
 
-			return handleResponse(cmd, resp)
+			return handleLinksListResponse(cmd, resp, output, limit, all)
 		},
 	}
 
 	cmd.Flags().StringVar(&search, "search", "", "Search query")
 	cmd.Flags().StringVar(&domain, "domain", "", "Filter by domain")
+	cmd.Flags().StringVarP(&output, "output", "o", "table", "Output format: table, json")
+	cmd.Flags().IntVar(&limit, "limit", 25, "Maximum number of links to show")
+	cmd.Flags().BoolVar(&all, "all", false, "Show all links (ignore limit)")
 
 	return cmd
 }
