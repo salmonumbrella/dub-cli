@@ -2,10 +2,16 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 
 	"github.com/spf13/cobra"
+
+	"github.com/salmonumbrella/dub-cli/internal/api"
+	"github.com/salmonumbrella/dub-cli/internal/outfmt"
 )
 
 func newDomainsCmd() *cobra.Command {
@@ -83,7 +89,9 @@ func newDomainsListCmd() *cobra.Command {
 	var (
 		archived bool
 		search   string
-		page     int
+		output   string
+		limit    int
+		all      bool
 	)
 
 	cmd := &cobra.Command{
@@ -103,9 +111,6 @@ func newDomainsListCmd() *cobra.Command {
 			if search != "" {
 				params.Set("search", search)
 			}
-			if page > 0 {
-				params.Set("page", fmt.Sprintf("%d", page))
-			}
 
 			path := "/domains"
 			if len(params) > 0 {
@@ -117,15 +122,130 @@ func newDomainsListCmd() *cobra.Command {
 				return err
 			}
 
-			return handleResponse(cmd, resp)
+			return handleDomainsListResponse(cmd, resp, output, limit, all)
 		},
 	}
 
 	cmd.Flags().BoolVar(&archived, "archived", false, "Include archived domains")
 	cmd.Flags().StringVar(&search, "search", "", "Search query")
-	cmd.Flags().IntVar(&page, "page", 0, "Page number")
+	cmd.Flags().StringVarP(&output, "output", "o", "table", "Output format: table, json")
+	cmd.Flags().IntVar(&limit, "limit", 25, "Maximum number of domains to show")
+	cmd.Flags().BoolVar(&all, "all", false, "Show all domains (ignore limit)")
 
 	return cmd
+}
+
+// Domain represents a Dub domain from the API response.
+type Domain struct {
+	ID          string  `json:"id"`
+	Slug        string  `json:"slug"`
+	Verified    bool    `json:"verified"`
+	Placeholder *string `json:"placeholder"`
+	Links       int     `json:"_count,omitempty"`
+}
+
+// handleDomainsListResponse handles the response for domains list command,
+// formatting output as table or JSON based on the output flag.
+func handleDomainsListResponse(cmd *cobra.Command, resp *http.Response, output string, limit int, all bool) error {
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode >= 400 {
+		apiErr := api.ParseAPIError(body)
+		return fmt.Errorf("%s", apiErr.Error())
+	}
+
+	// For JSON output, use the existing handler
+	if output == "json" {
+		var data interface{}
+		if err := json.Unmarshal(body, &data); err != nil {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(body))
+			return nil
+		}
+		query := outfmt.GetQuery(cmd.Context())
+		return outfmt.FormatJSON(cmd.OutOrStdout(), data, query)
+	}
+
+	// Parse domains for table output
+	var domains []map[string]interface{}
+	if err := json.Unmarshal(body, &domains); err != nil {
+		return fmt.Errorf("failed to parse domains: %w", err)
+	}
+
+	totalCount := len(domains)
+
+	// Apply limit unless --all is set
+	displayLimit := limit
+	if all {
+		displayLimit = totalCount
+	}
+	if displayLimit > totalCount {
+		displayLimit = totalCount
+	}
+
+	displayDomains := domains[:displayLimit]
+
+	// Define table columns
+	columns := []outfmt.Column{
+		{Name: "Domain", Width: 0, Align: outfmt.AlignLeft},
+		{Name: "Verified", Width: 0, Align: outfmt.AlignLeft},
+		{Name: "Placeholder", Width: 40, Align: outfmt.AlignLeft},
+		{Name: "Links", Width: 0, Align: outfmt.AlignRight},
+	}
+
+	// Build rows
+	rows := make([][]string, len(displayDomains))
+	for i, domain := range displayDomains {
+		rows[i] = []string{
+			outfmt.SafeString(domain["slug"]),
+			outfmt.FormatBool(domain["verified"]),
+			formatPlaceholder(domain["placeholder"]),
+			formatLinkCount(domain),
+		}
+	}
+
+	// Write table
+	if err := outfmt.FormatTable(cmd.OutOrStdout(), columns, rows); err != nil {
+		return err
+	}
+
+	// Show pagination message if limited
+	if displayLimit < totalCount {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nShowing %d of %d domains. Use --limit or --all for more.\n", displayLimit, totalCount)
+	}
+
+	return nil
+}
+
+// formatPlaceholder formats the placeholder URL or returns "-" if not set.
+func formatPlaceholder(placeholder interface{}) string {
+	s := outfmt.SafeString(placeholder)
+	if s == "" {
+		return "-"
+	}
+	return outfmt.Truncate(s, 40)
+}
+
+// formatLinkCount extracts the link count from domain data.
+// The API returns link count in _count.links nested structure.
+func formatLinkCount(domain map[string]interface{}) string {
+	// Try _count.links nested structure first
+	if countObj, ok := domain["_count"].(map[string]interface{}); ok {
+		if links, ok := countObj["links"]; ok {
+			return formatClicks(outfmt.SafeInt(links))
+		}
+	}
+
+	// Fallback to direct links field
+	if links, ok := domain["links"]; ok {
+		return formatClicks(outfmt.SafeInt(links))
+	}
+
+	return "0"
 }
 
 func newDomainsUpdateCmd() *cobra.Command {

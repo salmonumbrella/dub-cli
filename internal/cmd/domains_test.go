@@ -106,11 +106,107 @@ func TestDomainsCheckCmd_RequiresSlug(t *testing.T) {
 func TestDomainsListCmd_Flags(t *testing.T) {
 	cmd := newDomainsListCmd()
 
-	flags := []string{"archived", "search", "page"}
+	flags := []string{"archived", "search", "output", "limit", "all"}
 	for _, name := range flags {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("expected flag %q to exist", name)
 		}
+	}
+}
+
+func TestDomainsListCmd_OutputFlagShorthand(t *testing.T) {
+	cmd := newDomainsListCmd()
+
+	flag := cmd.Flags().Lookup("output")
+	if flag == nil {
+		t.Fatal("expected flag 'output' to exist")
+	}
+	if flag.Shorthand != "o" {
+		t.Errorf("expected output flag shorthand to be 'o', got %q", flag.Shorthand)
+	}
+}
+
+func TestDomainsListCmd_DefaultLimit(t *testing.T) {
+	cmd := newDomainsListCmd()
+
+	flag := cmd.Flags().Lookup("limit")
+	if flag == nil {
+		t.Fatal("expected flag 'limit' to exist")
+	}
+	if flag.DefValue != "25" {
+		t.Errorf("expected limit default to be '25', got %q", flag.DefValue)
+	}
+}
+
+func TestDomainsListCmd_DefaultOutput(t *testing.T) {
+	cmd := newDomainsListCmd()
+
+	flag := cmd.Flags().Lookup("output")
+	if flag == nil {
+		t.Fatal("expected flag 'output' to exist")
+	}
+	if flag.DefValue != "table" {
+		t.Errorf("expected output default to be 'table', got %q", flag.DefValue)
+	}
+}
+
+func TestFormatPlaceholder(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    interface{}
+		expected string
+	}{
+		{"nil value", nil, "-"},
+		{"empty string", "", "-"},
+		{"short URL", "https://dub.co", "https://dub.co"},
+		{"long URL truncated", "https://example.com/very/long/path/that/exceeds/forty/characters/limit", "https://example.com/very/long/path/th..."},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatPlaceholder(tt.input)
+			if result != tt.expected {
+				t.Errorf("formatPlaceholder(%v) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFormatLinkCount(t *testing.T) {
+	tests := []struct {
+		name     string
+		domain   map[string]interface{}
+		expected string
+	}{
+		{
+			name:     "no links field",
+			domain:   map[string]interface{}{"slug": "example.com"},
+			expected: "0",
+		},
+		{
+			name:     "links in _count.links",
+			domain:   map[string]interface{}{"_count": map[string]interface{}{"links": float64(142)}},
+			expected: "142",
+		},
+		{
+			name:     "links as direct field",
+			domain:   map[string]interface{}{"links": float64(5)},
+			expected: "5",
+		},
+		{
+			name:     "links with comma formatting",
+			domain:   map[string]interface{}{"_count": map[string]interface{}{"links": float64(1234)}},
+			expected: "1,234",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatLinkCount(tt.domain)
+			if result != tt.expected {
+				t.Errorf("formatLinkCount() = %q, want %q", result, tt.expected)
+			}
+		})
 	}
 }
 
