@@ -545,7 +545,10 @@ const setupTemplate = `<!DOCTYPE html>
         const workspaceInput = document.getElementById('workspace');
         const eyeIcon = document.getElementById('eyeIcon');
         const eyeOffIcon = document.getElementById('eyeOffIcon');
-        const csrfToken = document.getElementById('csrf_token').value;
+        function getCsrfToken() {
+            const el = document.getElementById('csrf_token');
+            return el ? el.value : '';
+        }
 
         let isBusy = false;
 
@@ -618,13 +621,15 @@ const setupTemplate = `<!DOCTYPE html>
             showStatus('loading', 'Testing connection...');
 
             try {
-                const formData = new FormData();
-                formData.append('csrf_token', csrfToken);
-                formData.append('api_key', apiKey);
+                const csrfVal = getCsrfToken();
+                const params = new URLSearchParams();
+                params.append('csrf_token', csrfVal);
+                params.append('api_key', apiKey);
 
                 const resp = await fetch('/validate', {
                     method: 'POST',
-                    body: formData
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: params.toString()
                 });
                 const data = await resp.json();
 
@@ -655,14 +660,16 @@ const setupTemplate = `<!DOCTYPE html>
             showStatus('loading', 'Saving credentials...');
 
             try {
-                const formData = new FormData();
-                formData.append('csrf_token', csrfToken);
-                formData.append('workspace', workspaceInput.value.trim());
-                formData.append('api_key', apiKeyInput.value.trim());
+                const csrfVal = getCsrfToken();
+                const params = new URLSearchParams();
+                params.append('csrf_token', csrfVal);
+                params.append('workspace', workspaceInput.value.trim());
+                params.append('api_key', apiKeyInput.value.trim());
 
                 const resp = await fetch('/submit', {
                     method: 'POST',
-                    body: formData
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: params.toString()
                 });
                 const data = await resp.json();
 
