@@ -1,0 +1,26 @@
+# Binaries
+/dub
+*.exe
+*.test
+
+# IDE
+.cursor/
+.idea/
+.vscode/
+
+# Specstory
+.specstory/
+
+# OS
+.DS_Store
+
+# Build artifacts
+dist/
+.tools/
+
+# Test artifacts
+coverage.out
+*.prof
+
+# Documentation (local only)
+docs/
