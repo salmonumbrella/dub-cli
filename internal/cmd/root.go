@@ -45,6 +45,7 @@ func NewRootCmd() *cobra.Command {
 		Use:          "dub",
 		Short:        "Dub CLI - manage your Dub links from the terminal",
 		Long:         "dub - A command-line interface for the Dub API. Manage links, analytics, domains, and more.",
+		Version:      Version,
 		SilenceUsage: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Initialize debug logging based on --debug flag
