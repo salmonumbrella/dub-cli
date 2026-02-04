@@ -64,3 +64,18 @@ changelog:
       - "^ci:"
       - Merge pull request
       - Merge branch
+
+brews:
+  - name: dub-cli
+    repository:
+      owner: salmonumbrella
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/salmonumbrella/dub-cli"
+    description: "CLI for Dub.co to manage links, domains, analytics, and workspaces"
+    license: "MIT"
+    install: |
+      bin.install "dub"
+    test: |
+      system "#{bin}/dub", "--help"
