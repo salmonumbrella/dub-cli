@@ -1,0 +1,81 @@
+version: 2
+
+project_name: dub-cli
+
+builds:
+  # macOS builds - require CGO for keychain access (99designs/keyring uses go-keychain)
+  - id: dub-darwin
+    main: ./cmd/dub
+    binary: dub
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/salmonumbrella/dub-cli/internal/cmd.Version={{.Version}}
+      - -X github.com/salmonumbrella/dub-cli/internal/cmd.Commit={{.ShortCommit}}
+      - -X github.com/salmonumbrella/dub-cli/internal/cmd.Date={{.Date}}
+
+  # Linux and Windows builds - no CGO needed
+  - id: dub-other
+    main: ./cmd/dub
+    binary: dub
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/salmonumbrella/dub-cli/internal/cmd.Version={{.Version}}
+      - -X github.com/salmonumbrella/dub-cli/internal/cmd.Commit={{.ShortCommit}}
+      - -X github.com/salmonumbrella/dub-cli/internal/cmd.Date={{.Date}}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+brews:
+  - name: dub-cli
+    repository:
+      owner: salmonumbrella
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/salmonumbrella/dub-cli"
+    description: "CLI for Dub.co to manage links, domains, analytics, and workspaces"
+    license: "MIT"
+    install: |
+      bin.install "dub"
+    test: |
+      system "#{bin}/dub", "--help"

@@ -1,0 +1,33 @@
+# Binaries
+/dub
+*.exe
+*.test
+
+# IDE & AI
+.vscode/
+.claude/
+.cursor/
+.idea/
+.specstory/
+CLAUDE.md
+*.swp
+*.swo
+*~
+
+# Agent artifacts
+.dm/
+.private-journal/
+
+# OS
+.DS_Store
+
+# Build artifacts
+dist/
+.tools/
+
+# Test artifacts
+coverage.out
+*.prof
+
+# Documentation (plans/drafts)
+docs/
