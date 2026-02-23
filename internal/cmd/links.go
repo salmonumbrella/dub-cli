@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -371,9 +372,46 @@ func newLinksCountCmd() *cobra.Command {
 	return cmd
 }
 
+// resolveLink looks up a link by domain and key, returning the link ID.
+func resolveLink(ctx context.Context, client *api.Client, domain, key string) (string, error) {
+	params := url.Values{}
+	params.Set("domain", domain)
+	params.Set("key", key)
+
+	resp, err := client.Get(ctx, "/links/info?"+params.Encode())
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode >= 400 {
+		apiErr := api.ParseAPIError(body)
+		return "", fmt.Errorf("failed to resolve link %s/%s: %s", domain, key, apiErr.Error())
+	}
+
+	var link struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &link); err != nil {
+		return "", fmt.Errorf("failed to parse link info: %w", err)
+	}
+
+	if link.ID == "" {
+		return "", fmt.Errorf("link %s/%s not found", domain, key)
+	}
+
+	return link.ID, nil
+}
+
 func newLinksUpdateCmd() *cobra.Command {
 	var (
 		id      string
+		domain  string
 		linkURL string
 		key     string
 	)
@@ -381,10 +419,10 @@ func newLinksUpdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Update a link",
-		Long:  "Update an existing link by ID.",
+		Long:  "Update an existing link by ID or by domain and key.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if id == "" {
-				return fmt.Errorf("--id is required")
+			if id == "" && (domain == "" || key == "") {
+				return fmt.Errorf("either --id or both --domain and --key are required")
 			}
 
 			client, err := getClient(cmd.Context())
@@ -392,19 +430,30 @@ func newLinksUpdateCmd() *cobra.Command {
 				return err
 			}
 
+			// Resolve link ID if using domain+key lookup
+			linkID := id
+			if linkID == "" {
+				resolved, err := resolveLink(cmd.Context(), client, domain, key)
+				if err != nil {
+					return err
+				}
+				linkID = resolved
+			}
+
 			body := map[string]interface{}{}
 			if linkURL != "" {
 				body["url"] = linkURL
 			}
-			if key != "" {
+			// key is only a field to update when identifying by --id
+			if id != "" && key != "" {
 				body["key"] = key
 			}
 
 			if len(body) == 0 {
-				return fmt.Errorf("at least one of --url or --key must be specified")
+				return fmt.Errorf("at least one update field (--url) must be specified")
 			}
 
-			resp, err := client.Patch(cmd.Context(), "/links/"+url.PathEscape(id), body)
+			resp, err := client.Patch(cmd.Context(), "/links/"+url.PathEscape(linkID), body)
 			if err != nil {
 				return err
 			}
@@ -413,11 +462,10 @@ func newLinksUpdateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&id, "id", "", "Link ID (required)")
+	cmd.Flags().StringVar(&id, "id", "", "Link ID")
+	cmd.Flags().StringVar(&domain, "domain", "", "Domain (used with --key to identify link)")
 	cmd.Flags().StringVar(&linkURL, "url", "", "New destination URL")
-	cmd.Flags().StringVar(&key, "key", "", "New short key")
-
-	_ = cmd.MarkFlagRequired("id")
+	cmd.Flags().StringVar(&key, "key", "", "Short key (used with --domain to identify link, or with --id to rename)")
 
 	return cmd
 }

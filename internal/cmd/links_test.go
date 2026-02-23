@@ -81,13 +81,39 @@ func TestLinksGetCmd_RequiresIDOrDomainKey(t *testing.T) {
 	}
 }
 
-func TestLinksUpdateCmd_RequiresID(t *testing.T) {
-	cmd := newLinksUpdateCmd()
-	cmd.SetArgs([]string{"--url", "https://example.com"})
+func TestLinksUpdateCmd_RequiresIDOrDomainKey(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr bool
+	}{
+		{
+			name:    "no identifier flags",
+			args:    []string{"--url", "https://example.com"},
+			wantErr: true,
+		},
+		{
+			name:    "domain without key",
+			args:    []string{"--domain", "dub.sh", "--url", "https://example.com"},
+			wantErr: true,
+		},
+		{
+			name:    "key without domain",
+			args:    []string{"--key", "my-link", "--url", "https://example.com"},
+			wantErr: true,
+		},
+	}
 
-	err := cmd.Execute()
-	if err == nil {
-		t.Error("expected error when --id is not provided")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newLinksUpdateCmd()
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			if tt.wantErr && err == nil {
+				t.Error("expected error but got nil")
+			}
+		})
 	}
 }
 
