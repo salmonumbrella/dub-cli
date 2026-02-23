@@ -2,6 +2,9 @@ version: 2
 
 project_name: dub-cli
 
+release:
+  mode: replace
+
 builds:
   # macOS builds - require CGO for keychain access (99designs/keyring uses go-keychain)
   - id: dub-darwin
